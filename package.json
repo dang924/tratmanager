@@ -1,0 +1,21 @@
+{
+  "name": "weight-bot",
+  "version": "1.0.0",
+  "description": "Discord bot for tracking Offender Weight scores in a MafiaRP Enforcer system",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "deploy-commands": "node deploy-commands.js",
+    "postinstall": "npm rebuild better-sqlite3"
+  },
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
+  }
+}
