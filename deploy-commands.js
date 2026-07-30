@@ -75,6 +75,13 @@ const commands = [
       .toJSON(),
 
   new SlashCommandBuilder()
+    .setName('roleadd')
+    .setDescription('Assign a role to a user if your role is permitted to grant it')
+    .addUserOption((opt) => opt.setName('user').setDescription('User to receive the role').setRequired(true))
+    .addRoleOption((opt) => opt.setName('role').setDescription('Role to assign').setRequired(true))
+    .toJSON(),
+
+  new SlashCommandBuilder()
     .setName('giverole')
     .setDescription('Assign a role to a user if your role is permitted to grant it')
     .addUserOption((opt) => opt.setName('user').setDescription('User to receive the role').setRequired(true))
