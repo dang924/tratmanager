@@ -28,6 +28,11 @@ function canGrantRoleForMember(member, guildId, targetRoleId) {
   return member.roles.cache.some((role) => db.canGrantRole(guildId, role.id, targetRoleId));
 }
 
+function canChangeNameForMember(member, guildId, targetRoleId) {
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  return member.roles.cache.some((role) => db.canChangeRoleName(guildId, role.id, targetRoleId));
+}
+
 function thresholdNote(weight) {
   if (weight > 10) return '🔴 **Over 10 Weight — punishment must be decided by HC.**';
   if (weight > 0) return '🟠 **Punishment must be decided by Head Enforcer+ or HC.**';
@@ -307,7 +312,7 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
-      if (interaction.commandName === 'roleadd') {
+      if (interaction.commandName === 'giverole' || interaction.commandName === 'roleadd') {
         const targetUser = interaction.options.getUser('user', true);
         const targetRole = interaction.options.getRole('role', true);
 
@@ -370,6 +375,81 @@ client.on('interactionCreate', async (interaction) => {
           console.error(error);
           await interaction.reply({ content: 'I could not assign that role. Check the role hierarchy and bot permissions.', flags: MessageFlags.Ephemeral });
         }
+        return;
+      }
+
+      if (interaction.commandName === 'setname') {
+        const targetUser = interaction.options.getUser('user', true);
+        const newName = interaction.options.getString('name', true).trim();
+
+        const memberToChange = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+        if (!memberToChange) {
+          await interaction.reply({ content: 'That user is not available in this server.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        // Check permissions: Admins or role-based name-change permissions
+        const allowed = interaction.member.permissions.has(PermissionFlagsBits.Administrator) ||
+          interaction.member.roles.cache.some((r) => {
+            const cfg = db.getNamePermissions(interaction.guildId);
+            return cfg.some((m) => m.grant_role_id === r.id && (!m.target_role_id || memberToChange.roles.cache.has(m.target_role_id)));
+          });
+
+        if (!allowed) {
+          await interaction.reply({ content: 'You do not have permission to change that user\'s nickname.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const botMember = interaction.guild.members.me;
+        if (!botMember.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+          await interaction.reply({ content: 'The bot needs the Manage Nicknames permission to change nicknames.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        try {
+          await memberToChange.setNickname(newName);
+          await interaction.reply({ content: `Changed nickname of <@${targetUser.id}> to **${newName}**.`, flags: MessageFlags.Ephemeral });
+        } catch (error) {
+          console.error(error);
+          await interaction.reply({ content: 'I could not change that user\'s nickname. Check role hierarchy and bot permissions.', flags: MessageFlags.Ephemeral });
+        }
+        return;
+      }
+
+      if (interaction.commandName === 'setnameperms') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          await interaction.reply({ content: 'Only administrators can manage name permissions.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'add') {
+          const grantRole = interaction.options.getRole('grantrole', true);
+          const targetRole = interaction.options.getRole('targetrole', true);
+          db.addNamePermission(interaction.guildId, grantRole.id, targetRole.id);
+          await interaction.reply({ content: `<@&${grantRole.id}> can now rename <@&${targetRole.id}>.`, flags: MessageFlags.Ephemeral });
+          return;
+        } else if (sub === 'remove') {
+          const grantRole = interaction.options.getRole('grantrole', true);
+          const targetRole = interaction.options.getRole('targetrole', true);
+          db.removeNamePermission(interaction.guildId, grantRole.id, targetRole.id);
+          await interaction.reply({ content: `<@&${grantRole.id}> can no longer rename <@&${targetRole.id}>.`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+      }
+
+      if (interaction.commandName === 'nameperms') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          await interaction.reply({ content: 'Only administrators can view name permissions.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const mappings = db.getNamePermissions(interaction.guildId);
+        const content = mappings.length
+          ? mappings.map(({ grant_role_id, target_role_id }) => `<@&${grant_role_id}> → <@&${target_role_id}>`).join('\n')
+          : 'No role rename permissions have been configured.';
+
+        await interaction.reply({ content: `**Role rename permissions**\n${content}`, flags: MessageFlags.Ephemeral });
         return;
       }
 

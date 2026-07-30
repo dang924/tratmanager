@@ -46,6 +46,13 @@ CREATE TABLE IF NOT EXISTS role_permission_mappings (
   target_role_id TEXT NOT NULL,
   PRIMARY KEY (guild_id, grant_role_id, target_role_id)
 );
+
+CREATE TABLE IF NOT EXISTS name_permission_mappings (
+  guild_id TEXT NOT NULL,
+  grant_role_id TEXT NOT NULL,
+  target_role_id TEXT,
+  PRIMARY KEY (guild_id, grant_role_id, target_role_id)
+);
 `);
 
 // Migrations for older DBs created before these fields existed.
@@ -142,6 +149,31 @@ function canGrantRole(guildId, grantRoleId, targetRoleId) {
   return Boolean(row);
 }
 
+function getNamePermissions(guildId) {
+  return db.prepare(
+    'SELECT grant_role_id, target_role_id FROM name_permission_mappings WHERE guild_id = ? ORDER BY grant_role_id, COALESCE(target_role_id, "")'
+  ).all(guildId);
+}
+
+function addNamePermission(guildId, grantRoleId, targetRoleId) {
+  db.prepare(`
+    INSERT OR IGNORE INTO name_permission_mappings (guild_id, grant_role_id, target_role_id)
+    VALUES (?, ?, ?)
+  `).run(guildId, grantRoleId, targetRoleId);
+}
+
+function removeNamePermission(guildId, grantRoleId, targetRoleId) {
+  db.prepare('DELETE FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id = ?')
+    .run(guildId, grantRoleId, targetRoleId);
+}
+
+function canChangeRoleName(guildId, grantRoleId, targetRoleId) {
+  const row = db.prepare(
+    'SELECT 1 FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id = ?'
+  ).get(guildId, grantRoleId, targetRoleId);
+  return Boolean(row);
+}
+
 function ensureOffender(userId, guildId, details = {}) {
   const existing = db.prepare('SELECT * FROM offenders WHERE user_id = ?').get(userId);
   if (existing) {
@@ -224,7 +256,11 @@ module.exports = {
   getRolePermissions,
   addRolePermission,
   removeRolePermission,
+  getNamePermissions,
+  addNamePermission,
+  removeNamePermission,
   canGrantRole,
+  canChangeRoleName,
   ensureOffender,
   setCaseMessage,
   addEntry,

@@ -41,8 +41,41 @@ const commands = [
     .addSubcommand((sub) => sub.setName('view').setDescription('View current configuration'))
     .toJSON(),
 
+    new SlashCommandBuilder()
+      .setName('setname')
+      .setDescription("Change a user's nickname")
+      .addUserOption((opt) => opt.setName('user').setDescription('User to rename').setRequired(true))
+      .addStringOption((opt) => opt.setName('name').setDescription('New nickname for the user').setRequired(true))
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName('setnameperms')
+      .setDescription('Configure which roles can change members\' nicknames')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Allow a role to rename members who have the target role (omit target to allow All)')
+          .addRoleOption((opt) => opt.setName('grantrole').setDescription('Role that can rename members').setRequired(true))
+          .addRoleOption((opt) => opt.setName('targetrole').setDescription('Role whose members may be renamed').setRequired(false))
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('Remove a name-change permission')
+          .addRoleOption((opt) => opt.setName('grantrole').setDescription('Role that can rename members').setRequired(true))
+          .addRoleOption((opt) => opt.setName('targetrole').setDescription('Role whose members may be renamed').setRequired(false))
+      )
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName('nameperms')
+      .setDescription('List role rename permissions')
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .toJSON(),
+
   new SlashCommandBuilder()
-    .setName('roleadd')
+    .setName('giverole')
     .setDescription('Assign a role to a user if your role is permitted to grant it')
     .addUserOption((opt) => opt.setName('user').setDescription('User to receive the role').setRequired(true))
     .addRoleOption((opt) => opt.setName('role').setDescription('Role to assign').setRequired(true))
