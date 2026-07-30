@@ -347,6 +347,44 @@ async function postRoleAssignmentLog({ guild, giver, recipient, role }) {
   }
 }
 
+async function postNameChangeLog({ guild, changer, target, oldName, newName }) {
+  const cfg = db.getConfig(guild.id);
+  const channelId = cfg.role_log_channel_id;
+  if (!channelId) {
+    console.warn(`[role-logs] No role log channel configured for guild ${guild.id}`);
+    return;
+  }
+
+  const channel = guild.channels.cache.get(channelId) || (await guild.channels.fetch(channelId).catch(() => null));
+  if (!channel || !channel.isTextBased?.()) {
+    console.warn(`[role-logs] Could not resolve role log channel ${channelId} for guild ${guild.id}`);
+    return;
+  }
+
+  const botPermissions = channel.permissionsFor?.(guild.members.me) || null;
+  if (!botPermissions?.has(PermissionFlagsBits.SendMessages) || !botPermissions.has(PermissionFlagsBits.EmbedLinks)) {
+    console.warn(`[role-logs] Bot lacks message/embed permissions for role log channel ${channelId}`);
+    return;
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('Name Changed')
+    .setColor(0x3498db)
+    .addFields(
+      { name: 'Changed by', value: changer ? `<@${changer.id}>` : 'Unknown', inline: true },
+      { name: 'User', value: target ? `<@${target.id}>` : 'Unknown', inline: true },
+      { name: 'Old name', value: oldName || 'Unknown', inline: true },
+      { name: 'New name', value: newName || 'Unknown', inline: true }
+    )
+    .setTimestamp();
+
+  try {
+    await channel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error(`[role-logs] Failed to send name change log to ${channelId}:`, error);
+  }
+}
+
 async function refreshCaseMessage(guild, userId) {
   const offender = db.getOffender(userId);
   if (!offender || (!offender.case_channel_id || !offender.case_message_id)) return;
@@ -625,8 +663,16 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
+        const oldDisplayName = memberToChange.nickname || memberToChange.displayName || memberToChange.user.username;
         try {
           await memberToChange.setNickname(newName);
+          await postNameChangeLog({
+            guild: interaction.guild,
+            changer: interaction.user,
+            target: targetUser,
+            oldName: oldDisplayName,
+            newName,
+          });
           await interaction.reply({ content: `Changed nickname of <@${targetUser.id}> to **${newName}**.`, flags: MessageFlags.Ephemeral });
         } catch (error) {
           console.error(error);
