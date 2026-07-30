@@ -37,23 +37,10 @@ CREATE TABLE IF NOT EXISTS guild_config (
   log_channel_id TEXT,
   cases_channel_id TEXT,
   role_log_channel_id TEXT,
-  grab_profile_channel_id TEXT,
+  grab_profile_source_channel_ids TEXT NOT NULL DEFAULT '[]',
+  grab_profile_destination_map TEXT NOT NULL DEFAULT '{}',
   allowed_role_ids TEXT NOT NULL DEFAULT '[]',
   grab_profile_allowed_role_ids TEXT NOT NULL DEFAULT '[]'
-);
-
-CREATE TABLE IF NOT EXISTS grab_profile_search_permissions (
-  guild_id TEXT NOT NULL,
-  grant_role_id TEXT NOT NULL,
-  channel_id TEXT NOT NULL,
-  PRIMARY KEY (guild_id, grant_role_id, channel_id)
-);
-
-CREATE TABLE IF NOT EXISTS grab_profile_destinations (
-  guild_id TEXT NOT NULL,
-  grant_role_id TEXT NOT NULL,
-  channel_id TEXT NOT NULL,
-  PRIMARY KEY (guild_id, grant_role_id)
 );
 
 CREATE TABLE IF NOT EXISTS role_permission_mappings (
@@ -79,8 +66,11 @@ if (!guildConfigCols.includes('cases_channel_id')) {
 if (!guildConfigCols.includes('role_log_channel_id')) {
   db.exec('ALTER TABLE guild_config ADD COLUMN role_log_channel_id TEXT');
 }
-if (!guildConfigCols.includes('grab_profile_channel_id')) {
-  db.exec('ALTER TABLE guild_config ADD COLUMN grab_profile_channel_id TEXT');
+if (!guildConfigCols.includes('grab_profile_source_channel_ids')) {
+  db.exec("ALTER TABLE guild_config ADD COLUMN grab_profile_source_channel_ids TEXT NOT NULL DEFAULT '[]'");
+}
+if (!guildConfigCols.includes('grab_profile_destination_map')) {
+  db.exec("ALTER TABLE guild_config ADD COLUMN grab_profile_destination_map TEXT NOT NULL DEFAULT '{}'");
 }
 if (!guildConfigCols.includes('grab_profile_allowed_role_ids')) {
   db.exec("ALTER TABLE guild_config ADD COLUMN grab_profile_allowed_role_ids TEXT NOT NULL DEFAULT '[]'");
@@ -105,13 +95,15 @@ const SIXTY_DAYS_MS = 60 * 24 * 60 * 60 * 1000;
 function getConfig(guildId) {
   let row = db.prepare('SELECT * FROM guild_config WHERE guild_id = ?').get(guildId);
   if (!row) {
-    db.prepare('INSERT INTO guild_config (guild_id, allowed_role_ids, grab_profile_allowed_role_ids) VALUES (?, ?, ?)').run(guildId, '[]', '[]');
+    db.prepare('INSERT INTO guild_config (guild_id, allowed_role_ids, grab_profile_allowed_role_ids, grab_profile_source_channel_ids, grab_profile_destination_map) VALUES (?, ?, ?, ?, ?)')
+      .run(guildId, '[]', '[]', '[]', '{}');
     row = {
       guild_id: guildId,
       log_channel_id: null,
       cases_channel_id: null,
       role_log_channel_id: null,
-      grab_profile_channel_id: null,
+      grab_profile_source_channel_ids: '[]',
+      grab_profile_destination_map: '{}',
       allowed_role_ids: '[]',
       grab_profile_allowed_role_ids: '[]',
     };
@@ -119,7 +111,8 @@ function getConfig(guildId) {
   return {
     ...row,
     role_log_channel_id: row.role_log_channel_id ?? null,
-    grab_profile_channel_id: row.grab_profile_channel_id ?? null,
+    grab_profile_source_channel_ids: JSON.parse(row.grab_profile_source_channel_ids ?? '[]'),
+    grab_profile_destination_map: JSON.parse(row.grab_profile_destination_map ?? '{}'),
     allowed_role_ids: JSON.parse(row.allowed_role_ids ?? '[]'),
     grab_profile_allowed_role_ids: JSON.parse(row.grab_profile_allowed_role_ids ?? '[]'),
   };
@@ -156,17 +149,67 @@ function removeAllowedRole(guildId, roleId) {
     .run(JSON.stringify(next), guildId);
 }
 
-function getGrabProfileConfig(guildId) {
+function addGrabProfileSourceChannel(guildId, channelId) {
   const cfg = getConfig(guildId);
-  return {
-    channel_id: cfg.grab_profile_channel_id ?? null,
-    allowed_role_ids: cfg.grab_profile_allowed_role_ids ?? [],
-  };
+  if (!cfg.grab_profile_source_channel_ids.includes(channelId)) {
+    cfg.grab_profile_source_channel_ids.push(channelId);
+    db.prepare('UPDATE guild_config SET grab_profile_source_channel_ids = ? WHERE guild_id = ?')
+      .run(JSON.stringify(cfg.grab_profile_source_channel_ids), guildId);
+  }
 }
 
-function setGrabProfileChannel(guildId, channelId) {
-  getConfig(guildId);
-  db.prepare('UPDATE guild_config SET grab_profile_channel_id = ? WHERE guild_id = ?').run(channelId, guildId);
+function removeGrabProfileSourceChannel(guildId, channelId) {
+  const cfg = getConfig(guildId);
+  const next = cfg.grab_profile_source_channel_ids.filter((id) => id !== channelId);
+  db.prepare('UPDATE guild_config SET grab_profile_source_channel_ids = ? WHERE guild_id = ?')
+    .run(JSON.stringify(next), guildId);
+}
+
+function getGrabProfileSourceChannels(guildId) {
+  const cfg = getConfig(guildId);
+  return cfg.grab_profile_source_channel_ids;
+}
+
+function addGrabProfileDestination(guildId, roleId, channelId) {
+  const cfg = getConfig(guildId);
+  const destinationMap = cfg.grab_profile_destination_map || {};
+  const existing = destinationMap[roleId] || [];
+  if (!existing.includes(channelId)) {
+    destinationMap[roleId] = [...existing, channelId];
+    db.prepare('UPDATE guild_config SET grab_profile_destination_map = ? WHERE guild_id = ?')
+      .run(JSON.stringify(destinationMap), guildId);
+  }
+}
+
+function removeGrabProfileDestination(guildId, roleId, channelId) {
+  const cfg = getConfig(guildId);
+  const destinationMap = cfg.grab_profile_destination_map || {};
+  const existing = destinationMap[roleId] || [];
+  const next = existing.filter((id) => id !== channelId);
+  if (next.length > 0) {
+    destinationMap[roleId] = next;
+  } else {
+    delete destinationMap[roleId];
+  }
+  db.prepare('UPDATE guild_config SET grab_profile_destination_map = ? WHERE guild_id = ?')
+    .run(JSON.stringify(destinationMap), guildId);
+}
+
+function getGrabProfileDestinationsForRoles(guildId, roleIds) {
+  if (!Array.isArray(roleIds) || roleIds.length === 0) return [];
+  const cfg = getConfig(guildId);
+  const destinationMap = cfg.grab_profile_destination_map || {};
+  const channels = new Set();
+  for (const roleId of roleIds) {
+    const roleChannels = destinationMap[roleId] || [];
+    for (const channelId of roleChannels) channels.add(channelId);
+  }
+  return [...channels];
+}
+
+function getAllGrabProfileDestinations(guildId) {
+  const cfg = getConfig(guildId);
+  return cfg.grab_profile_destination_map || {};
 }
 
 function addGrabProfileAllowedRole(guildId, roleId) {
@@ -185,65 +228,9 @@ function removeGrabProfileAllowedRole(guildId, roleId) {
     .run(JSON.stringify(next), guildId);
 }
 
-function getGrabProfileSearchChannelsForRoles(guildId, roleIds) {
-  if (!Array.isArray(roleIds) || roleIds.length === 0) return [];
-  const placeholders = roleIds.map(() => '?').join(',');
-  const rows = db.prepare(
-    `SELECT DISTINCT channel_id FROM grab_profile_search_permissions WHERE guild_id = ? AND grant_role_id IN (${placeholders})`
-  ).all(guildId, ...roleIds);
-  return rows.map((row) => row.channel_id);
-}
-
-function getAllGrabProfileSearchChannels(guildId) {
-  const rows = db.prepare(
-    'SELECT DISTINCT channel_id FROM grab_profile_search_permissions WHERE guild_id = ?'
-  ).all(guildId);
-  return rows.map((row) => row.channel_id);
-}
-
-function getGrabProfileDestinationChannelForRoles(guildId, roleIds) {
-  if (!Array.isArray(roleIds) || roleIds.length === 0) return null;
-  const rows = db.prepare(
-    `SELECT grant_role_id, channel_id FROM grab_profile_destinations WHERE guild_id = ? AND grant_role_id IN (${roleIds.map(() => '?').join(',')})`
-  ).all(guildId, ...roleIds);
-  if (!rows.length) return null;
-  return rows[0].channel_id;
-}
-
 function getAllGrabProfileDestinations(guildId) {
-  return db.prepare(
-    'SELECT grant_role_id, channel_id FROM grab_profile_destinations WHERE guild_id = ? ORDER BY grant_role_id'
-  ).all(guildId);
-}
-
-function setGrabProfileDestinationChannelForRole(guildId, grantRoleId, channelId) {
-  db.prepare(
-    'INSERT INTO grab_profile_destinations (guild_id, grant_role_id, channel_id) VALUES (?, ?, ?)' +
-    ' ON CONFLICT(guild_id, grant_role_id) DO UPDATE SET channel_id = excluded.channel_id'
-  ).run(guildId, grantRoleId, channelId);
-}
-
-function removeGrabProfileDestinationChannelForRole(guildId, grantRoleId) {
-  db.prepare('DELETE FROM grab_profile_destinations WHERE guild_id = ? AND grant_role_id = ?')
-    .run(guildId, grantRoleId);
-}
-
-function getAllGrabProfileSearchPermissions(guildId) {
-  return db.prepare(
-    'SELECT grant_role_id, channel_id FROM grab_profile_search_permissions WHERE guild_id = ? ORDER BY grant_role_id, channel_id'
-  ).all(guildId);
-}
-
-function addGrabProfileSearchPermission(guildId, grantRoleId, channelId) {
-  db.prepare(
-    'INSERT OR IGNORE INTO grab_profile_search_permissions (guild_id, grant_role_id, channel_id) VALUES (?, ?, ?)'
-  ).run(guildId, grantRoleId, channelId);
-}
-
-function removeGrabProfileSearchPermission(guildId, grantRoleId, channelId) {
-  db.prepare(
-    'DELETE FROM grab_profile_search_permissions WHERE guild_id = ? AND grant_role_id = ? AND channel_id = ?'
-  ).run(guildId, grantRoleId, channelId);
+  const cfg = getConfig(guildId);
+  return cfg.grab_profile_destination_map || {};
 }
 
 function getRolePermissions(guildId) {
@@ -382,8 +369,13 @@ module.exports = {
   setRoleLogChannel,
   addAllowedRole,
   removeAllowedRole,
-  getGrabProfileConfig,
-  setGrabProfileChannel,
+  addGrabProfileSourceChannel,
+  removeGrabProfileSourceChannel,
+  getGrabProfileSourceChannels,
+  addGrabProfileDestination,
+  removeGrabProfileDestination,
+  getGrabProfileDestinationsForRoles,
+  getAllGrabProfileDestinations,
   addGrabProfileAllowedRole,
   removeGrabProfileAllowedRole,
   getRolePermissions,

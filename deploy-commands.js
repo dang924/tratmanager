@@ -40,42 +40,41 @@ const commands = [
     )
     .addSubcommand((sub) =>
       sub
-        .setName('grab-profile-channel')
-        .setDescription('Choose the channel where /grabprofile posts forwarded logs')
-        .addChannelOption((opt) => opt.setName('channel').setDescription('Target channel').setRequired(true))
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName('add-grab-profile-role')
+        .setName('grab-role-add')
         .setDescription('Allow a role to use /grabprofile')
         .addRoleOption((opt) => opt.setName('role').setDescription('Role to allow').setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
-        .setName('remove-grab-profile-role')
+        .setName('grab-role-remove')
         .setDescription('Remove a role from the /grabprofile allowlist')
         .addRoleOption((opt) => opt.setName('role').setDescription('Role to remove').setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
-        .setName('grab-profile-search-add')
-        .setDescription('Allow a role to search hiring logs in a channel')
-        .addRoleOption((opt) => opt.setName('role').setDescription('Role that may search this channel').setRequired(true))
-        .addChannelOption((opt) => opt.setName('channel').setDescription('Hiring log channel to search').setRequired(true))
+        .setName('grab-source-add')
+        .setDescription('Add a channel to the hiring-log search sources')
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Source channel').setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
-        .setName('grab-profile-search-remove')
-        .setDescription('Remove a role from searching hiring logs in a channel')
-        .addRoleOption((opt) => opt.setName('role').setDescription('Role that may search this channel').setRequired(true))
-        .addChannelOption((opt) => opt.setName('channel').setDescription('Hiring log channel to remove').setRequired(true))
+        .setName('grab-source-remove')
+        .setDescription('Remove a channel from the hiring-log search sources')
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Source channel').setRequired(true))
     )
     .addSubcommand((sub) =>
       sub
-        .setName('grab-profile-destination')
-        .setDescription('Set where /grabprofile forwards the hiring log for a role')
-        .addRoleOption((opt) => opt.setName('role').setDescription('Role that will forward here').setRequired(true))
-        .addChannelOption((opt) => opt.setName('channel').setDescription('Destination channel for forwarded logs').setRequired(true))
+        .setName('grab-destination-add')
+        .setDescription('Allow a role to forward a grab into this destination channel')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role to allow').setRequired(true))
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Destination channel').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('grab-destination-remove')
+        .setDescription('Remove a destination channel from a role')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role to remove from').setRequired(true))
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Destination channel').setRequired(true))
     )
     .addSubcommand((sub) => sub.setName('view').setDescription('View current configuration'))
     .toJSON(),

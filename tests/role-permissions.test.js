@@ -27,20 +27,29 @@ test('role permission helpers store and query role mappings', () => {
   assert.equal(db.canGrantRole('guild-1', 'grant-role-id', 'target-role-id'), false);
 });
 
-test('grab profile config stores channel and role allowlists', () => {
+test('grab profile config stores search sources, destinations, and allowed roles', () => {
   const db = loadDatabase();
 
-  const initial = db.getGrabProfileConfig('guild-2');
-  assert.equal(initial.channel_id, null);
-  assert.deepEqual(initial.allowed_role_ids, []);
+  const initial = db.getConfig('guild-2');
+  assert.deepEqual(initial.grab_profile_source_channel_ids, []);
+  assert.deepEqual(initial.grab_profile_destination_map, {});
+  assert.deepEqual(initial.grab_profile_allowed_role_ids, []);
 
-  db.setGrabProfileChannel('guild-2', 'channel-1');
+  db.addGrabProfileSourceChannel('guild-2', 'source-1');
+  db.addGrabProfileDestination('guild-2', 'role-1', 'dest-1');
   db.addGrabProfileAllowedRole('guild-2', 'role-1');
 
-  const updated = db.getGrabProfileConfig('guild-2');
-  assert.equal(updated.channel_id, 'channel-1');
-  assert.deepEqual(updated.allowed_role_ids, ['role-1']);
+  const updated = db.getConfig('guild-2');
+  assert.deepEqual(updated.grab_profile_source_channel_ids, ['source-1']);
+  assert.deepEqual(updated.grab_profile_destination_map, { 'role-1': ['dest-1'] });
+  assert.deepEqual(updated.grab_profile_allowed_role_ids, ['role-1']);
 
+  db.removeGrabProfileSourceChannel('guild-2', 'source-1');
+  db.removeGrabProfileDestination('guild-2', 'role-1', 'dest-1');
   db.removeGrabProfileAllowedRole('guild-2', 'role-1');
-  assert.deepEqual(db.getGrabProfileConfig('guild-2').allowed_role_ids, []);
+
+  const final = db.getConfig('guild-2');
+  assert.deepEqual(final.grab_profile_source_channel_ids, []);
+  assert.deepEqual(final.grab_profile_destination_map, {});
+  assert.deepEqual(final.grab_profile_allowed_role_ids, []);
 });
