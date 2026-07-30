@@ -38,6 +38,45 @@ const commands = [
         .setDescription('Remove a role from the allowed list')
         .addRoleOption((opt) => opt.setName('role').setDescription('Role to remove').setRequired(true))
     )
+    .addSubcommand((sub) =>
+      sub
+        .setName('grab-profile-channel')
+        .setDescription('Choose the channel where /grabprofile posts forwarded logs')
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Target channel').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('add-grab-profile-role')
+        .setDescription('Allow a role to use /grabprofile')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role to allow').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('remove-grab-profile-role')
+        .setDescription('Remove a role from the /grabprofile allowlist')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role to remove').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('grab-profile-search-add')
+        .setDescription('Allow a role to search hiring logs in a channel')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role that may search this channel').setRequired(true))
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Hiring log channel to search').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('grab-profile-search-remove')
+        .setDescription('Remove a role from searching hiring logs in a channel')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role that may search this channel').setRequired(true))
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Hiring log channel to remove').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('grab-profile-destination')
+        .setDescription('Set where /grabprofile forwards the hiring log for a role')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role that will forward here').setRequired(true))
+        .addChannelOption((opt) => opt.setName('channel').setDescription('Destination channel for forwarded logs').setRequired(true))
+    )
     .addSubcommand((sub) => sub.setName('view').setDescription('View current configuration'))
     .toJSON(),
 
@@ -73,6 +112,12 @@ const commands = [
       .setDescription('List role rename permissions')
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName('grabprofile')
+    .setDescription('Forward a user-related hiring log into the configured channel and open an incident thread')
+    .addUserOption((opt) => opt.setName('user').setDescription('User whose profile should be grabbed').setRequired(true))
+    .toJSON(),
 
   new SlashCommandBuilder()
     .setName('roleadd')

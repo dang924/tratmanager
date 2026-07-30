@@ -15,7 +15,14 @@ const {
 const cron = require('node-cron');
 const db = require('./database');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
 
 function isAuthorized(member, guildId) {
   if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
@@ -129,6 +136,102 @@ function buildCaseButtons(offenderId) {
     new ButtonBuilder().setCustomId(buildButtonId('remove_weight', offenderId)).setLabel('➖ Remove Weight').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(buildButtonId('refresh', offenderId)).setLabel('🔄 Refresh').setStyle(ButtonStyle.Secondary)
   );
+}
+
+function canUseGrabProfile(member, guildId) {
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+  const cfg = db.getGrabProfileConfig(guildId);
+  return member.roles.cache.some((role) => cfg.allowed_role_ids.includes(role.id));
+}
+
+async function collectRelevantMessages({ guild, targetUser }) {
+  const botMember = guild.members.me;
+  const botPermissions = botMember?.permissions ?? null;
+  if (!botPermissions?.has(PermissionFlagsBits.ViewChannel) || !botPermissions.has(PermissionFlagsBits.ReadMessageHistory)) {
+    return [];
+  }
+
+  const candidates = [];
+  for (const channel of guild.channels.cache.values()) {
+    if (!channel?.isTextBased?.() || channel.isThread?.()) continue;
+    const permissions = channel.permissionsFor?.(botMember) || null;
+    if (!permissions?.has(PermissionFlagsBits.ViewChannel) || !permissions.has(PermissionFlagsBits.ReadMessageHistory)) {
+      continue;
+    }
+
+    try {
+      const messages = await channel.messages.fetch({ limit: 25 });
+      for (const message of messages.values()) {
+        const content = message.content ?? '';
+        const authoredByTarget = message.author.id === targetUser.id;
+        const mentionsTarget = message.mentions.users.has(targetUser.id) || message.mentions.members?.has(targetUser.id);
+        const containsName = [targetUser.username, targetUser.displayName, targetUser.globalName]
+          .filter(Boolean)
+          .some((value) => content.toLowerCase().includes(value.toLowerCase()));
+        const containsTag = content.includes(`<@${targetUser.id}>`) || content.includes(targetUser.tag);
+
+        if (authoredByTarget || mentionsTarget || containsName || containsTag) {
+          candidates.push({
+            id: message.id,
+            channelId: message.channelId,
+            channelName: channel.name,
+            content: message.content || '(no text content)',
+            createdAt: message.createdTimestamp,
+            link: `https://discord.com/channels/${guild.id}/${message.channelId}/${message.id}`,
+          });
+        }
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return candidates
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 10);
+}
+
+async function postGrabProfileLog({ guild, targetUser, messages, moderator }) {
+  const cfg = db.getGrabProfileConfig(guild.id);
+  const channelId = cfg.channel_id;
+  if (!channelId) return { posted: false, reason: 'No grab-profile channel configured.' };
+
+  const channel = guild.channels.cache.get(channelId) || (await guild.channels.fetch(channelId).catch(() => null));
+  if (!channel || !channel.isTextBased?.()) {
+    return { posted: false, reason: 'Configured grab-profile channel could not be resolved.' };
+  }
+
+  const botPermissions = channel.permissionsFor?.(guild.members.me) || null;
+  if (!botPermissions?.has(PermissionFlagsBits.SendMessages) || !botPermissions.has(PermissionFlagsBits.EmbedLinks)) {
+    return { posted: false, reason: 'The bot lacks permission to post in the configured grab-profile channel.' };
+  }
+
+  const lines = messages.length
+    ? messages.map((message) => `• [${message.channelName}](${message.link}) — ${message.content.replace(/\s+/g, ' ').slice(0, 220)}`).join('\n')
+    : 'No matching messages were found for this user.';
+
+  const displayName = targetUser.displayName || targetUser.username;
+  const embed = new EmbedBuilder()
+    .setTitle(`Incident: ${displayName}`)
+    .setColor(0x3498db)
+    .addFields(
+      { name: 'Target', value: `<@${targetUser.id}>`, inline: true },
+      { name: 'Requested by', value: `<@${moderator.id}>`, inline: true },
+      { name: 'Matches', value: `${messages.length}`, inline: true },
+      { name: 'Messages', value: lines.slice(0, 1024) }
+    )
+    .setTimestamp();
+
+  try {
+    const sentMessage = await channel.send({ embeds: [embed] });
+    await sentMessage.startThread({
+      name: `Incident: ${displayName}`,
+      autoArchiveDuration: 1440,
+    }).catch(() => null);
+    return { posted: true, messageId: sentMessage.id, channelId: sentMessage.channelId };
+  } catch (error) {
+    return { posted: false, reason: 'Failed to post the grab-profile entry.' };
+  }
 }
 
 async function postLog({ guild, offenderUser, offenderDisplayName, moderator, type, amount, reason, oldWeight, newWeight }) {
@@ -300,16 +403,53 @@ client.on('interactionCreate', async (interaction) => {
           const role = interaction.options.getRole('role', true);
           db.removeAllowedRole(interaction.guildId, role.id);
           await interaction.reply({ content: `<@&${role.id}> can no longer add/remove Weight.`, flags: MessageFlags.Ephemeral });
+        } else if (sub === 'grab-profile-channel') {
+          const channel = interaction.options.getChannel('channel', true);
+          db.setGrabProfileChannel(interaction.guildId, channel.id);
+          await interaction.reply({ content: `/grabprofile posts will now go to <#${channel.id}>.`, flags: MessageFlags.Ephemeral });
+        } else if (sub === 'add-grab-profile-role') {
+          const role = interaction.options.getRole('role', true);
+          db.addGrabProfileAllowedRole(interaction.guildId, role.id);
+          await interaction.reply({ content: `<@&${role.id}> can now use /grabprofile.`, flags: MessageFlags.Ephemeral });
+        } else if (sub === 'remove-grab-profile-role') {
+          const role = interaction.options.getRole('role', true);
+          db.removeGrabProfileAllowedRole(interaction.guildId, role.id);
+          await interaction.reply({ content: `<@&${role.id}> can no longer use /grabprofile.`, flags: MessageFlags.Ephemeral });
         } else if (sub === 'view') {
           const cfg = db.getConfig(interaction.guildId);
           const roles = cfg.allowed_role_ids.length
             ? cfg.allowed_role_ids.map((r) => `<@&${r}>`).join(', ')
             : 'None configured (only server Administrators can act)';
+          const grabRoles = cfg.grab_profile_allowed_role_ids.length
+            ? cfg.grab_profile_allowed_role_ids.map((r) => `<@&${r}>`).join(', ')
+            : 'None configured (only server Administrators can act)';
           await interaction.reply({
-            content: `**Log channel:** ${cfg.log_channel_id ? `<#${cfg.log_channel_id}>` : 'Not set'}\n**Cases channel:** ${cfg.cases_channel_id ? `<#${cfg.cases_channel_id}>` : 'Not restricted (any channel)'}\n**Allowed roles:** ${roles}`,
+            content: `**Log channel:** ${cfg.log_channel_id ? `<#${cfg.log_channel_id}>` : 'Not set'}\n**Cases channel:** ${cfg.cases_channel_id ? `<#${cfg.cases_channel_id}>` : 'Not restricted (any channel)'}\n**Allowed roles:** ${roles}\n**Grab-profile channel:** ${cfg.grab_profile_channel_id ? `<#${cfg.grab_profile_channel_id}>` : 'Not set'}\n**Grab-profile roles:** ${grabRoles}`,
             flags: MessageFlags.Ephemeral,
           });
         }
+      }
+
+      if (interaction.commandName === 'grabprofile') {
+        const targetUser = interaction.options.getUser('user', true);
+        if (!canUseGrabProfile(interaction.member, interaction.guildId)) {
+          await interaction.reply({ content: 'You do not have permission to use /grabprofile.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const messages = await collectRelevantMessages({ guild: interaction.guild, targetUser });
+        const result = await postGrabProfileLog({ guild: interaction.guild, targetUser, messages, moderator: interaction.user });
+
+        if (!result.posted) {
+          await interaction.editReply({ content: `Unable to create the grab-profile entry: ${result.reason}` });
+          return;
+        }
+
+        await interaction.editReply({
+          content: `Grabbed ${messages.length} match${messages.length === 1 ? '' : 'es'} for <@${targetUser.id}> and posted them to the configured incident channel.`,
+        });
+        return;
       }
 
       if (interaction.commandName === 'giverole' || interaction.commandName === 'roleadd') {
