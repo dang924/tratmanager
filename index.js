@@ -389,10 +389,13 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         // Check permissions: Admins or role-based name-change permissions
+        const namePermissions = db.getNamePermissions(interaction.guildId);
         const allowed = interaction.member.permissions.has(PermissionFlagsBits.Administrator) ||
           interaction.member.roles.cache.some((r) => {
-            const cfg = db.getNamePermissions(interaction.guildId);
-            return cfg.some((m) => m.grant_role_id === r.id && (!m.target_role_id || memberToChange.roles.cache.has(m.target_role_id)));
+            return namePermissions.some((mapping) =>
+              mapping.grant_role_id === r.id &&
+              (!mapping.target_role_id || memberToChange.roles.cache.has(mapping.target_role_id))
+            );
           });
 
         if (!allowed) {
@@ -425,15 +428,25 @@ client.on('interactionCreate', async (interaction) => {
         const sub = interaction.options.getSubcommand();
         if (sub === 'add') {
           const grantRole = interaction.options.getRole('grantrole', true);
-          const targetRole = interaction.options.getRole('targetrole', true);
-          db.addNamePermission(interaction.guildId, grantRole.id, targetRole.id);
-          await interaction.reply({ content: `<@&${grantRole.id}> can now rename <@&${targetRole.id}>.`, flags: MessageFlags.Ephemeral });
+          const targetRole = interaction.options.getRole('targetrole', false);
+          db.addNamePermission(interaction.guildId, grantRole.id, targetRole?.id || null);
+          await interaction.reply({
+            content: targetRole
+              ? `<@&${grantRole.id}> can now rename members with <@&${targetRole.id}>.`
+              : `<@&${grantRole.id}> can now rename any member.`,
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         } else if (sub === 'remove') {
           const grantRole = interaction.options.getRole('grantrole', true);
-          const targetRole = interaction.options.getRole('targetrole', true);
-          db.removeNamePermission(interaction.guildId, grantRole.id, targetRole.id);
-          await interaction.reply({ content: `<@&${grantRole.id}> can no longer rename <@&${targetRole.id}>.`, flags: MessageFlags.Ephemeral });
+          const targetRole = interaction.options.getRole('targetrole', false);
+          db.removeNamePermission(interaction.guildId, grantRole.id, targetRole?.id || null);
+          await interaction.reply({
+            content: targetRole
+              ? `<@&${grantRole.id}> can no longer rename members with <@&${targetRole.id}>.`
+              : `<@&${grantRole.id}> can no longer rename any member.`,
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
       }
@@ -446,7 +459,11 @@ client.on('interactionCreate', async (interaction) => {
 
         const mappings = db.getNamePermissions(interaction.guildId);
         const content = mappings.length
-          ? mappings.map(({ grant_role_id, target_role_id }) => `<@&${grant_role_id}> → <@&${target_role_id}>`).join('\n')
+          ? mappings.map(({ grant_role_id, target_role_id }) =>
+              target_role_id
+                ? `<@&${grant_role_id}> → <@&${target_role_id}>`
+                : `<@&${grant_role_id}> → any member`
+            ).join('\n')
           : 'No role rename permissions have been configured.';
 
         await interaction.reply({ content: `**Role rename permissions**\n${content}`, flags: MessageFlags.Ephemeral });

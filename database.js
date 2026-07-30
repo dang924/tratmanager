@@ -151,7 +151,7 @@ function canGrantRole(guildId, grantRoleId, targetRoleId) {
 
 function getNamePermissions(guildId) {
   return db.prepare(
-    'SELECT grant_role_id, target_role_id FROM name_permission_mappings WHERE guild_id = ? ORDER BY grant_role_id, COALESCE(target_role_id, "")'
+    "SELECT grant_role_id, target_role_id FROM name_permission_mappings WHERE guild_id = ? ORDER BY grant_role_id, COALESCE(target_role_id, '')"
   ).all(guildId);
 }
 
@@ -163,14 +163,21 @@ function addNamePermission(guildId, grantRoleId, targetRoleId) {
 }
 
 function removeNamePermission(guildId, grantRoleId, targetRoleId) {
-  db.prepare('DELETE FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id = ?')
-    .run(guildId, grantRoleId, targetRoleId);
+  if (targetRoleId === null) {
+    db.prepare('DELETE FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id IS NULL')
+      .run(guildId, grantRoleId);
+  } else {
+    db.prepare('DELETE FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id = ?')
+      .run(guildId, grantRoleId, targetRoleId);
+  }
 }
 
 function canChangeRoleName(guildId, grantRoleId, targetRoleId) {
-  const row = db.prepare(
-    'SELECT 1 FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id = ?'
-  ).get(guildId, grantRoleId, targetRoleId);
+  const row = targetRoleId === null
+    ? db.prepare('SELECT 1 FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id IS NULL')
+      .get(guildId, grantRoleId)
+    : db.prepare('SELECT 1 FROM name_permission_mappings WHERE guild_id = ? AND grant_role_id = ? AND target_role_id = ?')
+      .get(guildId, grantRoleId, targetRoleId);
   return Boolean(row);
 }
 
