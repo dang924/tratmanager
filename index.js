@@ -226,8 +226,13 @@ async function pickGrabProfileDestinationChannel(guild, channelIds) {
   for (const channelId of channelIds) {
     const channel = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
     if (!channel?.isTextBased?.()) continue;
-    const botPermissions = channel.permissionsFor?.(guild.members.me) || null;
-    if (botPermissions?.has(PermissionFlagsBits.SendMessages) && botPermissions.has(PermissionFlagsBits.EmbedLinks)) {
+    const botMember = guild.members.me;
+    const botPermissions = channel.permissionsFor?.(botMember) || null;
+    if (
+      botPermissions?.has(PermissionFlagsBits.ViewChannel) &&
+      botPermissions.has(PermissionFlagsBits.SendMessages) &&
+      botPermissions.has(PermissionFlagsBits.EmbedLinks)
+    ) {
       return channel;
     }
   }
@@ -265,7 +270,8 @@ async function postGrabProfileLog({ guild, targetUser, messages, moderator, dest
     }).catch(() => null);
     return { posted: true, messageId: sentMessage.id, channelId: sentMessage.channelId };
   } catch (error) {
-    return { posted: false, reason: 'Failed to post the grab-profile entry.' };
+    console.error(`[grabprofile] Failed to post incident to ${channel.id}:`, error);
+    return { posted: false, reason: `Failed to post the grab-profile entry (${error?.message || 'unknown error'}).` };
   }
 }
 
