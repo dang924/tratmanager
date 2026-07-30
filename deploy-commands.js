@@ -155,6 +155,12 @@ const commands = [
     .toJSON(),
 
   new SlashCommandBuilder()
+    .setName('permissions')
+    .setDescription('View configured permission mappings')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .toJSON(),
+
+  new SlashCommandBuilder()
     .setName('rolelogs')
     .setDescription('Choose a channel to receive role assignment logs')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)

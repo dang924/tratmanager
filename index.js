@@ -224,31 +224,37 @@ function parseNameFromLogMessage(content) {
   return match?.[1]?.trim() ?? null;
 }
 
-async function pickGrabProfileDestinationChannel(guild, channelIds) {
+async function getPermittedGrabProfileDestinationChannels(guild, channelIds) {
   if (!Array.isArray(channelIds) || channelIds.length === 0) {
-    return null;
+    return [];
   }
 
+  const botMember = guild.members.me;
+  const destinations = [];
+  const seen = new Set();
+
   for (const channelId of channelIds) {
+    if (seen.has(channelId)) continue;
+    seen.add(channelId);
+
     const channel = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
     if (!channel?.isTextBased?.()) continue;
-    const botMember = guild.members.me;
     const botPermissions = channel.permissionsFor?.(botMember) || null;
     if (
       botPermissions?.has(PermissionFlagsBits.ViewChannel) &&
       botPermissions.has(PermissionFlagsBits.SendMessages) &&
       botPermissions.has(PermissionFlagsBits.EmbedLinks)
     ) {
-      return channel;
+      destinations.push(channel);
     }
   }
 
-  return null;
+  return destinations;
 }
 
 async function postGrabProfileLog({ guild, targetUser, messages, moderator, destinationChannelIds }) {
-  const channel = await pickGrabProfileDestinationChannel(guild, destinationChannelIds);
-  if (!channel) {
+  const channels = await getPermittedGrabProfileDestinationChannels(guild, destinationChannelIds);
+  if (!channels.length) {
     return { posted: false, reason: 'No permitted grabprofile destination channel is available.' };
   }
 
@@ -274,17 +280,30 @@ async function postGrabProfileLog({ guild, targetUser, messages, moderator, dest
     )
     .setTimestamp();
 
-  try {
-    const sentMessage = await channel.send({ embeds: [embed] });
-    await sentMessage.startThread({
-      name: `Incident: ${displayName}`,
-      autoArchiveDuration: 1440,
-    }).catch(() => null);
-    return { posted: true, messageId: sentMessage.id, channelId: sentMessage.channelId };
-  } catch (error) {
-    console.error(`[grabprofile] Failed to post incident to ${channel.id}:`, error);
-    return { posted: false, reason: `Failed to post the grab-profile entry (${error?.message || 'unknown error'}).` };
+  let firstSuccess = null;
+  let lastError = null;
+
+  for (const channel of channels) {
+    try {
+      const sentMessage = await channel.send({ embeds: [embed] });
+      await sentMessage.startThread({
+        name: `Incident: ${displayName}`,
+        autoArchiveDuration: 1440,
+      }).catch(() => null);
+      if (!firstSuccess) {
+        firstSuccess = { messageId: sentMessage.id, channelId: sentMessage.channelId };
+      }
+    } catch (error) {
+      lastError = error;
+      console.error(`[grabprofile] Failed to post incident to ${channel.id}:`, error);
+    }
   }
+
+  if (!firstSuccess) {
+    return { posted: false, reason: `Failed to post the grab-profile entry (${lastError?.message || 'unknown error'}).` };
+  }
+
+  return { posted: true, messageId: firstSuccess.messageId, channelId: firstSuccess.channelId };
 }
 
 async function postLog({ guild, offenderUser, offenderDisplayName, moderator, type, amount, reason, oldWeight, newWeight }) {
@@ -777,6 +796,57 @@ client.on('interactionCreate', async (interaction) => {
           : 'No role grant permissions have been configured.';
 
         await interaction.reply({ content: `**Role grant permissions**\n${content}`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      if (interaction.commandName === 'permissions') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          await interaction.reply({ content: 'Only administrators can view configured permissions.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const cfg = db.getConfig(interaction.guildId);
+        const roleGrantMappings = db.getRolePermissions(interaction.guildId);
+        const nameGrantMappings = db.getNamePermissions(interaction.guildId);
+
+        const roleGrantContent = roleGrantMappings.length
+          ? roleGrantMappings.map(({ grant_role_id, target_role_id }) => `<@&${grant_role_id}> → <@&${target_role_id}>`).join('\n')
+          : 'None configured';
+
+        const nameGrantContent = nameGrantMappings.length
+          ? nameGrantMappings.map(({ grant_role_id, target_role_id }) =>
+              target_role_id
+                ? `<@&${grant_role_id}> → <@&${target_role_id}>`
+                : `<@&${grant_role_id}> → any member`
+            ).join('\n')
+          : 'None configured';
+
+        const grabProfileRolesContent = cfg.grab_profile_allowed_role_ids.length
+          ? cfg.grab_profile_allowed_role_ids.map((roleId) => `<@&${roleId}>`).join(', ')
+          : 'None configured';
+
+        const grabProfileDestinationContent = Object.entries(cfg.grab_profile_destination_map || {}).length
+          ? Object.entries(cfg.grab_profile_destination_map).map(
+              ([roleId, channels]) => `<@&${roleId}> → ${channels.length ? channels.map((c) => `<#${c}>`).join(', ') : 'no destinations'}`
+            ).join('\n')
+          : 'None configured';
+
+        const allowedRoleContent = cfg.allowed_role_ids.length
+          ? cfg.allowed_role_ids.map((roleId) => `<@&${roleId}>`).join(', ')
+          : 'None configured';
+
+        const embed = new EmbedBuilder()
+          .setTitle('Configured Permissions')
+          .setColor(0x3498db)
+          .addFields(
+            { name: 'Weight role permissions', value: roleGrantContent.slice(0, 1024) || 'None configured' },
+            { name: 'Rename permissions', value: nameGrantContent.slice(0, 1024) || 'None configured' },
+            { name: 'Weight access roles', value: allowedRoleContent.slice(0, 1024) || 'None configured' },
+            { name: 'Grabprofile access roles', value: grabProfileRolesContent.slice(0, 1024) || 'None configured' },
+            { name: 'Grabprofile destinations', value: grabProfileDestinationContent.slice(0, 1024) || 'None configured' }
+          );
+
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
         return;
       }
 
