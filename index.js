@@ -218,6 +218,12 @@ async function collectRelevantMessages({ guild, targetUser }) {
     .slice(0, 10);
 }
 
+function parseNameFromLogMessage(content) {
+  const normalized = content.replace(/\s+/g, ' ');
+  const match = normalized.match(/Name:\s*([^\n]+?)\s+Date:/i);
+  return match?.[1]?.trim() ?? null;
+}
+
 async function pickGrabProfileDestinationChannel(guild, channelIds) {
   if (!Array.isArray(channelIds) || channelIds.length === 0) {
     return null;
@@ -250,7 +256,13 @@ async function postGrabProfileLog({ guild, targetUser, messages, moderator, dest
     ? messages.map((message) => `• [${message.channelName}](${message.link}) — ${message.content.replace(/\s+/g, ' ').slice(0, 220)}`).join('\n')
     : 'No matching messages were found for this user.';
 
-  const displayName = targetUser.displayName || targetUser.username;
+  let incidentName = null;
+  for (const message of messages) {
+    incidentName = parseNameFromLogMessage(message.content);
+    if (incidentName) break;
+  }
+
+  const displayName = incidentName || targetUser.displayName || targetUser.username;
   const embed = new EmbedBuilder()
     .setTitle(`Incident: ${displayName}`)
     .setColor(0x3498db)
