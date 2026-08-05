@@ -439,6 +439,27 @@ client.on('ready', () => {
   });
 });
 
+client.on('guildMemberAdd', async (member) => {
+  const joinRoleIds = db.getJoinRoles(member.guild.id);
+  if (!joinRoleIds.length) return;
+
+  const botMember = member.guild.members.me;
+  if (!botMember?.permissions.has(PermissionFlagsBits.ManageRoles)) return;
+
+  for (const roleId of joinRoleIds) {
+    const role = member.guild.roles.cache.get(roleId);
+    if (!role) continue;
+    if (role.permissions.has(PermissionFlagsBits.Administrator) || role.id === member.guild.id) continue;
+    if (role.comparePositionTo(botMember.roles.highest) >= 0) continue;
+
+    try {
+      await member.roles.add(role.id).catch(() => null);
+    } catch (error) {
+      console.error(`[joinrole] Failed to assign ${role.id} to ${member.id}:`, error);
+    }
+  }
+});
+
 client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
@@ -859,6 +880,36 @@ client.on('interactionCreate', async (interaction) => {
         const channel = interaction.options.getChannel('channel', true);
         db.setRoleLogChannel(interaction.guildId, channel.id);
         await interaction.reply({ content: `Role assignment logs will now be sent to <#${channel.id}>.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      if (interaction.commandName === 'joinrole') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          await interaction.reply({ content: 'Only administrators can manage join roles.', flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'add') {
+          const role = interaction.options.getRole('role', true);
+          db.addJoinRole(interaction.guildId, role.id);
+          await interaction.reply({ content: `<@&${role.id}> will now be assigned to new members.`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        if (sub === 'remove') {
+          const role = interaction.options.getRole('role', true);
+          db.removeJoinRole(interaction.guildId, role.id);
+          await interaction.reply({ content: `<@&${role.id}> will no longer be assigned to new members.`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+
+        const joinRoles = db.getJoinRoles(interaction.guildId);
+        const content = joinRoles.length
+          ? joinRoles.map((roleId) => `<@&${roleId}>`).join(', ')
+          : 'No auto-join roles have been configured.';
+
+        await interaction.reply({ content: `**Auto-join roles**\n${content}`, flags: MessageFlags.Ephemeral });
         return;
       }
       return;

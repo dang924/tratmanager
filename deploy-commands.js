@@ -166,6 +166,25 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption((opt) => opt.setName('channel').setDescription('Channel for role assignment logs').setRequired(true))
     .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName('joinrole')
+    .setDescription('Manage roles that are automatically assigned to new members')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand((sub) =>
+      sub
+        .setName('add')
+        .setDescription('Add a role to the auto-join role list')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role to assign to new members').setRequired(true))
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('remove')
+        .setDescription('Remove a role from the auto-join role list')
+        .addRoleOption((opt) => opt.setName('role').setDescription('Role to remove').setRequired(true))
+    )
+    .addSubcommand((sub) => sub.setName('list').setDescription('List all roles assigned to new members'))
+    .toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

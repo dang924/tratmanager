@@ -53,3 +53,19 @@ test('grab profile config stores search sources, destinations, and allowed roles
   assert.deepEqual(final.grab_profile_destination_map, {});
   assert.deepEqual(final.grab_profile_allowed_role_ids, []);
 });
+
+test('join-role helpers store and remove role IDs for auto-assignment', () => {
+  const db = loadDatabase();
+
+  assert.deepEqual(db.getJoinRoles('guild-3'), []);
+
+  db.addJoinRole('guild-3', 'role-1');
+  db.addJoinRole('guild-3', 'role-2');
+  db.addJoinRole('guild-3', 'role-1');
+
+  assert.deepEqual(db.getJoinRoles('guild-3'), ['role-1', 'role-2']);
+
+  db.removeJoinRole('guild-3', 'role-1');
+
+  assert.deepEqual(db.getJoinRoles('guild-3'), ['role-2']);
+});

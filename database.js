@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS guild_config (
   grab_profile_source_channel_ids TEXT NOT NULL DEFAULT '[]',
   grab_profile_destination_map TEXT NOT NULL DEFAULT '{}',
   allowed_role_ids TEXT NOT NULL DEFAULT '[]',
-  grab_profile_allowed_role_ids TEXT NOT NULL DEFAULT '[]'
+  grab_profile_allowed_role_ids TEXT NOT NULL DEFAULT '[]',
+  join_role_ids TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS role_permission_mappings (
@@ -75,6 +76,9 @@ if (!guildConfigCols.includes('grab_profile_destination_map')) {
 if (!guildConfigCols.includes('grab_profile_allowed_role_ids')) {
   db.exec("ALTER TABLE guild_config ADD COLUMN grab_profile_allowed_role_ids TEXT NOT NULL DEFAULT '[]'");
 }
+if (!guildConfigCols.includes('join_role_ids')) {
+  db.exec("ALTER TABLE guild_config ADD COLUMN join_role_ids TEXT NOT NULL DEFAULT '[]'");
+}
 
 const offenderCols = db.prepare('PRAGMA table_info(offenders)').all().map((c) => c.name);
 if (!offenderCols.includes('display_name')) {
@@ -106,6 +110,7 @@ function getConfig(guildId) {
       grab_profile_destination_map: '{}',
       allowed_role_ids: '[]',
       grab_profile_allowed_role_ids: '[]',
+      join_role_ids: '[]',
     };
   }
   return {
@@ -115,6 +120,7 @@ function getConfig(guildId) {
     grab_profile_destination_map: JSON.parse(row.grab_profile_destination_map ?? '{}'),
     allowed_role_ids: JSON.parse(row.allowed_role_ids ?? '[]'),
     grab_profile_allowed_role_ids: JSON.parse(row.grab_profile_allowed_role_ids ?? '[]'),
+    join_role_ids: JSON.parse(row.join_role_ids ?? '[]'),
   };
 }
 
@@ -210,6 +216,27 @@ function getGrabProfileDestinationsForRoles(guildId, roleIds) {
 function getAllGrabProfileDestinations(guildId) {
   const cfg = getConfig(guildId);
   return cfg.grab_profile_destination_map || {};
+}
+
+function getJoinRoles(guildId) {
+  const cfg = getConfig(guildId);
+  return cfg.join_role_ids || [];
+}
+
+function addJoinRole(guildId, roleId) {
+  const cfg = getConfig(guildId);
+  if (!cfg.join_role_ids.includes(roleId)) {
+    cfg.join_role_ids.push(roleId);
+    db.prepare('UPDATE guild_config SET join_role_ids = ? WHERE guild_id = ?')
+      .run(JSON.stringify(cfg.join_role_ids), guildId);
+  }
+}
+
+function removeJoinRole(guildId, roleId) {
+  const cfg = getConfig(guildId);
+  const next = cfg.join_role_ids.filter((r) => r !== roleId);
+  db.prepare('UPDATE guild_config SET join_role_ids = ? WHERE guild_id = ?')
+    .run(JSON.stringify(next), guildId);
 }
 
 function addGrabProfileAllowedRole(guildId, roleId) {
@@ -369,6 +396,9 @@ module.exports = {
   setRoleLogChannel,
   addAllowedRole,
   removeAllowedRole,
+  getJoinRoles,
+  addJoinRole,
+  removeJoinRole,
   addGrabProfileSourceChannel,
   removeGrabProfileSourceChannel,
   getGrabProfileSourceChannels,
